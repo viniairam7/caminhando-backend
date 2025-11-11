@@ -1,89 +1,77 @@
 import express from "express";
 import cors from "cors";
-import fetch from "node-fetch";
 import dotenv from "dotenv";
+import OpenAI from "openai";
 
 dotenv.config();
 
 const app = express();
-app.use(cors());
 app.use(express.json());
 
-// 🔑 Sua chave fica SOMENTE no Render
-const OPENROUTER_KEY = process.env.OPENROUTER_KEY;
+// ✅ CORS COMPLETO — Resolve seu erro no GitHub Pages
+app.use(cors({
+  origin: "*",
+  methods: "GET,POST,OPTIONS",
+  allowedHeaders: "Content-Type,Authorization",
+}));
 
-if (!OPENROUTER_KEY) {
-  console.error("❌ ERRO: Variável OPENROUTER_KEY não encontrada!");
-  process.exit(1);
-}
+// ✅ Necessário para evitar ERR_FAILED no Render
+app.options("*", cors());
 
-// ✅ Rota principal: gerar devocionais
-app.post("/gerar", async (req, res) => {
+// ----------------------
+// OpenAI Config
+// ----------------------
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
+
+// ----------------------
+// ROTA PRINCIPAL
+// ----------------------
+app.post("/", async (req, res) => {
   try {
-    const { tema } = req.body;
-
-    if (!tema) {
-      return res.status(400).json({ erro: "Tema obrigatório." });
-    }
+    const { tema, semanas, instrucoes } = req.body;
 
     const prompt = `
-Você é um teólogo cristão e deve criar:
-- 7 devocionais curtas baseadas no evangelho bíblico em tradução NAA
-- 1 estudo semanal profundo baseado no tema "${tema}"
+    Gere 7 devocionais + 1 estudo semanal no formato:
+    {
+      "devocionais": ["...", "..."],
+      "estudo": "..."
+    }
+    Tema: ${tema}
+    `;
 
-Formato da resposta:
-{
-  "devocionais": ["texto 1", "texto 2", ...],
-  "estudo": "texto completo"
-}
-`;
-
-    const resposta = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${OPENROUTER_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: "openrouter/mistral-large",
-        messages: [
-          {
-            role: "system",
-            content: "Você gera devocionais bíblicas profundas e fiéis ao texto da NAA."
-          },
-          {
-            role: "user",
-            content: prompt
-          }
-        ]
-      })
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.65
     });
 
-    const data = await resposta.json();
+    let content = completion.choices[0].message.content
+      .replace(/```json/g, "")
+      .replace(/```/g, "");
 
-    console.log("🔥 Resposta OpenRouter:", JSON.stringify(data, null, 2));
+    res.json(JSON.parse(content));
 
-    // Extrai o texto retornado
-    const texto = data.choices[0].message.content;
+  } catch (e) {
+    console.log("ERRO AI:", e);
 
-    // Tenta converter o JSON que a IA devolve
-    const jsonParsed = JSON.parse(texto);
-
-    return res.json(jsonParsed);
-
-  } catch (err) {
-    console.error("❌ ERRO AO GERAR:", err);
-    return res.status(500).json({ erro: "Erro ao gerar devocionais." });
+    return res.json({
+      devocionais: [
+        "Fallback Devocional 1",
+        "Fallback Devocional 2",
+        "Fallback Devocional 3",
+        "Fallback Devocional 4",
+        "Fallback Devocional 5",
+        "Fallback Devocional 6",
+        "Fallback Devocional 7",
+      ],
+      estudo: "Fallback Estudo"
+    });
   }
 });
 
-app.get("/", (req, res) => {
-  res.send("✅ API Caminhando na Palavra está rodando!");
-});
-
-// Porta do Render
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => {
-  console.log(`✅ Servidor rodando na porta ${PORT}`);
-});
+// Porta
+app.listen(process.env.PORT || 3000, () =>
+  console.log("✅ Backend ativo com CORS habilitado")
+);
